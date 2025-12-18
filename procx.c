@@ -65,6 +65,15 @@ typedef struct {
 } Message;
 
 int msgid=-1;
+static volatile sig_atomic_t g_exit_requested = 0;
+
+static SharedData *g_shm = NULL;
+static sem_t *g_sem = NULL;
+pthread_t monitor_tid;
+pthread_t listener_tid;
+int g_monitor_started=0;
+int g_listener_started=0;
+
 
 // Fonksiyon Prototipleri
 void start_process(SharedData *shm, sem_t *sem);
@@ -79,10 +88,10 @@ void send_message(int command, pid_t target_pid);
 void print_menu();
 int is_command_valid(const char *cmd);
 void sigint_handler(int sig); // Sinyal yakalayici
+void install_sigint(void);
 
 int main() {
-    // Ctrl+C (SIGINT) sinyalini yakala
-    signal(SIGINT, sigint_handler);
+    install_sigint();
 
     int shm_fd = shm_open(SHM_NAME, O_CREAT | O_RDWR, 0666);
     if (shm_fd == -1) {
@@ -99,14 +108,18 @@ int main() {
         perror("mmap hatasi");
         exit(1);
     }
+
+    g_shm = shared_mem_ptr;
     sem_t *sem = sem_open(SEM_NAME, O_CREAT, 0666, 1);
     if (sem == SEM_FAILED) {
         perror("sem_open hatasi");
         exit(1);
     }
+
+    g_sem = sem;
     sem_wait(sem);
 
-    // ✅ sadece ilk defa init
+    // sadece ilk defa init
     if (shared_mem_ptr->magic != SHM_MAGIC) {
         memset(shared_mem_ptr, 0, sizeof(SharedData));
         shared_mem_ptr->magic = SHM_MAGIC;
@@ -122,24 +135,28 @@ int main() {
     msgid = msgget(MSG_KEY, IPC_CREAT | 0666);
     if (msgid == -1) { perror("msgget"); exit(1); }
 
-    pthread_t monitor_tid;
+
     if (pthread_create(&monitor_tid, NULL, monitor_thread, (void *)shared_mem_ptr) != 0) {
         perror("Monitor thread olusturulamadi");
         exit(1);
     }
-    pthread_detach(monitor_tid);
+    g_monitor_started = 1;
     printf("Monitor thread baslatildi...\n");
 
-    pthread_t listener_tid;
     if (pthread_create(&listener_tid, NULL, listener_thread, NULL) != 0) {
         perror("Listener thread olusturulamadi");
         exit(1);
     }
-    pthread_detach(listener_tid);
+    g_listener_started = 1;
     printf("IPC Listener thread baslatildi...\n");
 
     int choice;
     while (1) {
+        if (g_exit_requested) {
+            printf("\n[INFO] Ctrl+C algilandi. Temiz cikis yapiliyor...\n");
+            clean_resources(g_shm, g_sem);
+            _exit(0); // exit yerine _exit: daha “sert” ama güvenli
+        }
         print_menu();
 
         if (scanf("%d", &choice) != 1) {
@@ -177,9 +194,23 @@ int main() {
 
 // Ctrl+C Handler
 void sigint_handler(int sig) {
-    printf("\n[INFO] Ctrl+C algilandi.\n");
-    fflush(stdout);
+    (void)sig;
+    g_exit_requested = 1;
 }
+
+void install_sigint(void) {
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = sigint_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;              // <<< SA_RESTART YOK
+
+    if (sigaction(SIGINT, &sa, NULL) == -1) {
+        perror("sigaction");
+        exit(1);
+    }
+}
+
 
 void print_menu() {
     printf("\n");
@@ -370,40 +401,63 @@ void list_processes(SharedData *shm, sem_t *sem) {
     sem_post(sem);
 }
 
-void stop_process(SharedData *shm, sem_t * sem) {
+void stop_process(SharedData *shm, sem_t *sem) {
     pid_t target_pid;
 
     printf("Sonlandirilacak process PID: ");
+    fflush(stdout);
+
+    errno = 0; // eski errno kalmasın
+
     if (scanf("%d", &target_pid) != 1) {
+
+        // Ctrl+C burada yakalanır (scanf EINTR ile bölünürse)
+        if (errno == EINTR || g_exit_requested) {
+            clearerr(stdin);
+            printf("\n[INFO] Ctrl+C algilandi. Temiz cikis...\n");
+            clean_resources(g_shm, g_sem);
+            exit(0);
+        }
+
+        // Ctrl+C değilse: gerçekten hatalı giriş
         printf("[ERROR] Gecersiz PID girdisi.\n");
-        while(getchar() != '\n');
+        clearerr(stdin);
+        int c;
+        while ((c = getchar()) != '\n' && c != EOF) {}
         return;
     }
-    while (getchar() != '\n');
+
+    // input satırı sonunu temizle
+    int c;
+    while ((c = getchar()) != '\n' && c != EOF) {}
+
+    // (Opsiyonel) Ctrl+C flag'i burada da kontrol edebilirsin
+    if (g_exit_requested) {
+        printf("\n[INFO] Ctrl+C algilandi. Temiz cikis...\n");
+        clean_resources(g_shm, g_sem);
+        exit(0);
+    }
 
     sem_wait(sem);
 
     int search = -1;
-    for (int i = 0; i < MAX_PROCESS; i++) { // sonlandirilacak process indexi araniyo
+    for (int i = 0; i < MAX_PROCESS; i++) {
         if (shm->processes[i].is_active && shm->processes[i].pid == target_pid) {
             search = i;
             break;
         }
     }
 
-    if (search != -1) { //eger bulunduysa
+    if (search != -1) {
         if (kill(target_pid, SIGTERM) == 0) {
             printf("[INFO] Process %d'e SIGTERM sinyali gonderildi.\n", target_pid);
-            shm->processes[search].status = STATUS_TERMINATED; // Monitor için işaretle waitpid ile surec gercekten sonlanir bu bir flag gibi
-
-            send_message(CMD_STOP, target_pid);
-
-        } else if (errno == ESRCH) { // no such process0
+            shm->processes[search].status = STATUS_TERMINATED;
+            // İstersen burada send_message(CMD_STOP, target_pid) yaparsın (ama duplicate olmasın diye tek yerde)
+        } else if (errno == ESRCH) {
             printf("[INFO] Process %d zaten sonlanmis veya bulunamiyor. Listeden kaldiriliyor.\n", target_pid);
             shm->processes[search].is_active = 0;
             if (shm->process_count > 0) shm->process_count--;
-        }
-        else {
+        } else {
             perror("Sinyal gonderilemedi");
         }
     } else {
@@ -412,6 +466,8 @@ void stop_process(SharedData *shm, sem_t * sem) {
 
     sem_post(sem);
 }
+
+
 void *monitor_thread(void *arg) {
     SharedData *shm = (SharedData *)arg;
     int status;
@@ -423,9 +479,10 @@ void *monitor_thread(void *arg) {
         return NULL;
     }
 
-    while (1) {
+    while (!g_exit_requested) {
         sleep(2);
         sem_wait(sem);
+        if (g_exit_requested) break;
 
         for (int i = 0; i < MAX_PROCESS; i++) {
             if (shm->processes[i].is_active && shm->processes[i].mode == MODE_DETACHED) {
@@ -475,10 +532,10 @@ void *monitor_thread(void *arg) {
 }
 
 void send_message(int command, pid_t target_pid) {
-    if (msgid == -1) return; // Kuyruk ID'si yoksa çık
+    if (msgid == -1) return; // Kuyruk id yoksa çık
 
     Message msg;
-    // msg_type 1 olmalıdır (genel iletişim tipi)
+    // msg_type 1 olmalıdır genel iletisim tipi
     msg.msg_type = 1;
     msg.command = command;
     msg.sender_pid = getpid();
@@ -501,13 +558,28 @@ void send_message(int command, pid_t target_pid) {
 void clean_resources(SharedData *shm_ptr, sem_t *sem_ptr) {
     printf("\n[CLEANUP] Cikis baslatiliyor...\n");
 
+    // 0) Thread'lere "çık" sinyali
+    g_exit_requested = 1;
+
+    // 0.1) Bloklanan threadleri uyandır / kestir
+    if (g_listener_started) {
+        pthread_cancel(listener_tid);   // msgrcv cancellation point
+    }
+    if (g_monitor_started) {
+        pthread_cancel(monitor_tid);    // sleep cancellation point
+    }
+
+    // 0.2) Join ile gerçekten kapandıklarını bekle (detach yok!)
+    if (g_listener_started) pthread_join(listener_tid, NULL);
+    if (g_monitor_started)  pthread_join(monitor_tid, NULL);
+
     pid_t my_pid = getpid();
     int last_instance = 0;
 
     // 1) Kritik bölüm: SHM + sayaç güncellemesi semaphore ile korunmalı
     sem_wait(sem_ptr);
 
-    // Bu instance'ın başlattığı ATTACHED processleri öldür (ctrl+c) gelirse attached processler sonlanmali
+    // Bu instance'ın başlattığı ATTACHED processleri öldür
     for (int i = 0; i < MAX_PROCESS; i++) {
         if (shm_ptr->processes[i].is_active &&
             shm_ptr->processes[i].owner_pid == my_pid) {
@@ -524,9 +596,7 @@ void clean_resources(SharedData *shm_ptr, sem_t *sem_ptr) {
     }
 
     // 2) Instance sayacini azalt
-    if (shm_ptr->active_procx > 0) {
-        shm_ptr->active_procx--;
-    }
+    if (shm_ptr->active_procx > 0) shm_ptr->active_procx--;
     last_instance = (shm_ptr->active_procx == 0);
 
     printf("[CLEANUP] Kalan instance sayisi: %d\n", shm_ptr->active_procx);
@@ -551,7 +621,10 @@ void clean_resources(SharedData *shm_ptr, sem_t *sem_ptr) {
         if (sem_unlink(SEM_NAME) != 0 && errno != ENOENT)
             perror("[CLEANUP] sem_unlink");
 
-
+        if (msgid != -1) {
+            if (msgctl(msgid, IPC_RMID, NULL) == -1)
+                perror("[CLEANUP] msgctl IPC_RMID");
+        }
     } else {
         printf("[CLEANUP] Diger instance'lar calisiyor. Kaynaklar korunuyor.\n");
     }
@@ -559,53 +632,43 @@ void clean_resources(SharedData *shm_ptr, sem_t *sem_ptr) {
     printf("[CLEANUP] ProcX kapandi.\n");
 }
 
-// Argüman olarak NULL beklediği için SharedData'ya global isimlerle erişir.
 void *listener_thread(void *arg) {
     (void)arg;
-
+    pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
+    pthread_setcanceltype(PTHREAD_CANCEL_DEFERRED, NULL);
     Message msg;
     pid_t my_pid = getpid();
     size_t msg_size = sizeof(Message) - sizeof(long);
 
-    while (1) {
-        // CPU harcamadan mesaj gelene kadar BLOKLAYARAK bekle
-        ssize_t r = msgrcv(msgid, &msg, msg_size, 0, 0);
+    while (!g_exit_requested) {
+        ssize_t r = msgrcv(msgid, &msg, msg_size, 0, IPC_NOWAIT);
 
         if (r == -1) {
-            // msgrcv hata verdiyse: sinyal ile bölündü vs. olabilir.
-            if (errno == EINTR) continue;     // tekrar dene
-            perror("msgrcv");
-            continue;                         // thread ölmesin
-        }
-
-        // Kendi gönderdiğim mesajı yanlışlıkla tükettiysem,
-        // diğer prosesler görsün diye tekrar kuyruğa bırak.
-        if (msg.sender_pid == my_pid) {
-            usleep(1000); // 1ms küçük bir nefes
-            if (msgsnd(msgid, &msg, msg_size, 0) == -1) {
-                perror("msgsnd (requeue)");
+            if (errno == ENOMSG) {
+                usleep(50 * 1000); // 50ms
+                continue;
             }
+            if (errno == EINTR) continue;
+            perror("msgrcv");
+            usleep(200 * 1000);
+            msgsnd(msgid, &msg, msg_size, 0);
+
             continue;
         }
 
-        // Seciminiz: 3[IPC] Process BAŞLATILDI: PID 1234 olmasin diye düzeltme
-        // \r -> carriage return imlec satir basi
-        // \033 -> ESC
-        // [K = imlecten satir sonuna kadar sil
-        printf("\r\033[K"); // satırı temizle (senin ilk kodundaki gibi)
+        if (msg.sender_pid == my_pid) continue;
 
-        if (msg.command == CMD_START) {
-            printf("[IPC] Process BAŞLATILDI: PID %d (Gönderen: %d)\n",
+        printf("\r\033[K");
+        if (msg.command == CMD_START)
+            printf("[IPC] Process BASLATILDI: PID %d (Gonderen: %d)\n",
                    msg.target_pid, msg.sender_pid);
-        } else if (msg.command == CMD_STOP) {
-            printf("[IPC] Process SONLANDIRILDI: PID %d (Gönderen: %d)\n",
+        else if (msg.command == CMD_STOP)
+            printf("[IPC] Process SONLANDIRILDI: PID %d (Gonderen: %d)\n",
                    msg.target_pid, msg.sender_pid);
-        } else {
-            printf("[IPC] Bilinmeyen komut: %d (PID %d, Gönderen: %d)\n",
-                   msg.command, msg.target_pid, msg.sender_pid);
-        }
-        printf("Seciminiz: "); // bu thread printf yaptigi icin input satiri bozuluyo
+
+        printf("Seciminiz: ");
         fflush(stdout);
     }
+
     return NULL;
 }
