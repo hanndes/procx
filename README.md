@@ -69,24 +69,24 @@ Program açıldığında karşınıza 4 ana seçenekten oluşan bir menü gelir:
 
 🎮 Kullanım Örneği
 
-Terminal 1
-╔══════════════════════════════════╗
-║            ProcX v1.0            ║
-╠══════════════════════════════════╣
-║ 1. Yeni Program Calistir         ║
-║ 2. Calisan Programlari Listele   ║
-║ 3. Program Sonlandir             ║
-║ 0. Cikis                         ║
-╚══════════════════════════════════╝
+    Terminal 1
+    ╔══════════════════════════════════╗
+    ║            ProcX v1.0            ║
+    ╠══════════════════════════════════╣
+    ║ 1. Yeni Program Calistir         ║
+    ║ 2. Calisan Programlari Listele   ║
+    ║ 3. Program Sonlandir             ║
+    ║ 0. Cikis                         ║
+    ╚══════════════════════════════════╝
 
-Seciminiz: 1
-Calistirilacak komutu girin: sleep 100
-Mod secin (0: Attached, 1: Detached): 1
-[SUCCESS] Process baslatildi: PID 12345
+    Seciminiz: 1
+    Calistirilacak komutu girin: sleep 100
+    Mod secin (0: Attached, 1: Detached): 1
+    [SUCCESS] Process baslatildi: PID 12345
 
 
-Terminal 2
-[IPC] Process BASLATILDI: PID 12345 (Gonderen: 12340)
+    Terminal 2
+    [IPC] Process BASLATILDI: PID 12345 (Gonderen: 12340)
 
 🎯 Kazanımlar
 Bu proje sayesinde şunları öğrenebilirsiniz:
