@@ -112,18 +112,15 @@ int main() {
         shared_mem_ptr->magic = SHM_MAGIC;
     }
 
-    // ✅ her açılan terminal sayacı artırır
+    // her açılan terminal sayacı artırır
     shared_mem_ptr->active_procx++;
 
     printf("[INFO] Aktif instance sayisi: %d\n", shared_mem_ptr->active_procx);
 
     sem_post(sem);
 
-
     msgid = msgget(MSG_KEY, IPC_CREAT | 0666);
     if (msgid == -1) { perror("msgget"); exit(1); }
-
-
 
     pthread_t monitor_tid;
     if (pthread_create(&monitor_tid, NULL, monitor_thread, (void *)shared_mem_ptr) != 0) {
@@ -181,7 +178,6 @@ int main() {
 // Ctrl+C Handler
 void sigint_handler(int sig) {
     printf("\n[INFO] Ctrl+C algilandi.\n");
-    clean_resources();
     fflush(stdout);
 }
 
@@ -335,11 +331,9 @@ void start_process(SharedData * shm, sem_t * sem) {
     } else {
         printf("[ERROR] Process listesi dolu! (Max 50)\n");
         kill(pid, SIGTERM);
-        // Hata durumunda semaphore kilitli kaldı, açmalıyız.
+        // hata durumunda semaphore kilitli kaldi acmaliyiz
         sem_post(sem);
     }
-
-    // Detached modda (veya Attached değilse) buraya ulaşılır ve Semaphore zaten yukarıda (if'in hemen üstünde) serbest bırakılmıştır.
 }
 
 void list_processes(SharedData *shm, sem_t *sem) {
@@ -404,7 +398,7 @@ void stop_process(SharedData *shm, sem_t * sem) {
 
             send_message(CMD_STOP, target_pid);
 
-        } else if (errno == ESRCH) {
+        } else if (errno == ESRCH) { // no such process0
             printf("[INFO] Process %d zaten sonlanmis veya bulunamiyor. Listeden kaldiriliyor.\n", target_pid);
             shm->processes[search].is_active = 0;
             if (shm->process_count > 0) shm->process_count--;
@@ -513,12 +507,12 @@ void clean_resources(SharedData *shm_ptr, sem_t *sem_ptr) {
     // 1) Kritik bölüm: SHM + sayaç güncellemesi semaphore ile korunmalı
     sem_wait(sem_ptr);
 
-    // Bu instance'ın başlattığı ATTACHED processleri öldür
+    // Bu instance'ın başlattığı ATTACHED processleri öldür (ctrl+c) gelirse attached processler sonlanmali
     for (int i = 0; i < MAX_PROCESS; i++) {
         if (shm_ptr->processes[i].is_active &&
             shm_ptr->processes[i].owner_pid == my_pid) {
 
-            if (shm_ptr->processes[i].mode == MODE_ATTACHED) { // ctrl+c gelirse
+            if (shm_ptr->processes[i].mode == MODE_ATTACHED) {
                 printf("[CLEANUP] Attached process %d sonlandiriliyor...\n",
                        shm_ptr->processes[i].pid);
                 kill(shm_ptr->processes[i].pid, SIGTERM);
