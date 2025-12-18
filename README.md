@@ -88,28 +88,28 @@ Program açıldığında karşınıza 4 ana seçenekten oluşan bir menü gelir:
 🎯 Kazanımlar
 Bu proje sayesinde şunları öğrenebilirsiniz:
 
-    IPC Mekanizmaları: Shared memory, semaphore ve message queue'lerin gerçek kullanımı
-    Eşzamanlılık: Race condition ve deadlock'tan korunma yöntemleri
-    Process Yönetimi: Fork, exec, wait ve sinyal yönetimi
-    Zombie Process: Zombie process probleminin pratik çözümü
-    Thread + Process Koordinasyonu: Threading ve IPC'nin birlikte kullanımı
-    İşletim Sistemi Seviyesinde Senkronizasyon: Production-grade senkronizasyon kalıpları
+IPC Mekanizmaları: Shared memory, semaphore ve message queue'lerin gerçek kullanımı
+Eşzamanlılık: Race condition ve deadlock'tan korunma yöntemleri
+Process Yönetimi: Fork, exec, wait ve sinyal yönetimi
+Zombie Process: Zombie process probleminin pratik çözümü
+Thread + Process Koordinasyonu: Threading ve IPC'nin birlikte kullanımı
+İşletim Sistemi Seviyesinde Senkronizasyon: Production-grade senkronizasyon kalıpları
 
 🐛 Önemli Uygulama Detayları
 
-    Maksimum 50 eş zamanlı process (MAX_PROCESS)
-    Komut doğrulama çalıştırmadan önce
-    Owner tracking her process için cleanup amaçlı
-    Graceful degradation message queue dolu olduğunda
-    Baştan sona thread-safe operasyonlar
+Maksimum 50 eş zamanlı process (MAX_PROCESS)
+Komut doğrulama çalıştırmadan önce
+Owner tracking her process için cleanup amaçlı
+Graceful degradation message queue dolu olduğunda
+Baştan sona thread-safe operasyonlar
 
 📝 Notlar
 
-    Tüm instance'lar aynı process tablosunu paylaşır
-    Detached process'ler terminal kapansa bile çalışmaya devam eder
-    Message queue sadece bildirim amaçlıdır
-    Semaphore veri tutarlılığını garanti eder
-    Beklenmeyen sonlanmalarda bile düzgün cleanup yapılır
+Tüm instance'lar aynı process tablosunu paylaşır
+Detached process'ler terminal kapansa bile çalışmaya devam eder
+Message queue sadece bildirim amaçlıdır
+Semaphore veri tutarlılığını garanti eder
+Beklenmeyen sonlanmalarda bile düzgün cleanup yapılır
 
 🔧 Gereksinimler
 
