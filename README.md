@@ -23,6 +23,7 @@ ProcX, terminal tabanlı bir process yönetim aracıdır ve şunları yapmanıza
     Thread Tabanlı Mimari: Asenkron işlemler için monitor ve listener thread'leri
 
 🛠️ Kullanılan Teknolojiler
+
 Bileşen	Amaç
 shm_open + mmap	Instance'lar arası paylaşılan process tablosu
 sem_open/wait/post	Kritik bölge koruması
@@ -31,6 +32,8 @@ pthread	Monitor & Listener thread'leri
 fork + execvp	Process başlatma
 waitpid(WNOHANG)	Zombie process önleme
 signal(SIGINT)	Ctrl+C yakalama
+
+
 🏗️ Mimari
 
 ┌──────────────────────┐
@@ -67,6 +70,7 @@ signal(SIGINT)	Ctrl+C yakalama
 └──────────────────────────────┘
 
 🔄 Process Türleri
+
 🔹 Attached Process
 
     Terminale bağlı olarak ön planda çalışır
@@ -82,6 +86,7 @@ signal(SIGINT)	Ctrl+C yakalama
     Sonlandığında otomatik olarak temizlenir
 
 🧵 Thread Görevleri
+
 🛠️ Monitor Thread
 
     Sadece DETACHED process'leri izler
