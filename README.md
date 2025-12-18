@@ -68,14 +68,14 @@ Program açıldığında karşınıza 4 ana seçenekten oluşan bir menü gelir:
 
 🎮 Kullanım Örneği
     Terminal 1
-    ╔══════════════════════════════════╗
-    ║            ProcX v1.0            ║
-    ╠══════════════════════════════════╣
-    ║ 1. Yeni Program Calistir         ║
-    ║ 2. Calisan Programlari Listele   ║
-    ║ 3. Program Sonlandir             ║
-    ║ 0. Cikis                         ║
-    ╚══════════════════════════════════╝
+        ╔══════════════════════════════════╗
+        ║            ProcX v1.0            ║
+        ╠══════════════════════════════════╣
+        ║ 1. Yeni Program Calistir         ║
+        ║ 2. Calisan Programlari Listele   ║
+        ║ 3. Program Sonlandir             ║
+        ║ 0. Cikis                         ║
+        ╚══════════════════════════════════╝
 
     Seciminiz: 1
     Calistirilacak komutu girin: sleep 100
