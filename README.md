@@ -29,10 +29,10 @@ Signal Handling	SIGINT sinyali ile güvenli çıkış yönetimi.
 
 Kodun derlenmesi için pthread ve rt (real-time) kütüphanelerinin bağlanması gerekir:
 
-    Derleme:
-    Bash
+Derleme:
+Bash
 
-gcc -o procx main.c -lpthread -lrt
+     gcc -o procx main.c -lpthread -lrt
 
 Çalıştırma:
 Bash
