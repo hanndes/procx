@@ -3,7 +3,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/wait.h>
-#include <sys/ipc.h>
+#include <sys/ipc.h>  //system v ipc
 #include <sys/shm.h>
 #include <pthread.h>
 #include <fcntl.h>
@@ -67,8 +67,8 @@ typedef struct {
 int msgid=-1;
 static volatile sig_atomic_t g_exit_requested = 0;
 
-static SharedData *g_shm = NULL;
-static sem_t *g_sem = NULL;
+static SharedData *shm = NULL;
+static sem_t *sem = NULL;
 pthread_t monitor_tid;
 pthread_t listener_tid;
 int g_monitor_started=0;
@@ -76,10 +76,11 @@ int g_listener_started=0;
 
 
 // Fonksiyon Prototipleri
-void start_process(SharedData *shm, sem_t *sem);
-void list_processes(SharedData *shm, sem_t *sem);
-void stop_process(SharedData *shm, sem_t *sem);
-void clean_resources(SharedData *shm_ptr, sem_t *sem_ptr);
+void init_sources();
+void start_process();
+void list_processes();
+void stop_process();
+void clean_resources();
 void *monitor_thread(void *arg);
 void *listener_thread(void *arg);
 int get_input_from_user(char *cmd_buffer, int *mode);
@@ -92,70 +93,13 @@ void install_sigint(void);
 
 int main() {
     install_sigint();
-
-    int shm_fd = shm_open(SHM_NAME, O_CREAT | O_RDWR, 0666);
-    if (shm_fd == -1) {
-        perror("shm_open"); exit(1);
-    }
-
-    if (ftruncate(shm_fd, sizeof(SharedData)) == -1) {
-        perror("ftruncate"); exit(1);
-    }
-
-    SharedData *shared_mem_ptr = (SharedData *)mmap(NULL, sizeof(SharedData),PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
-
-    if (shared_mem_ptr == MAP_FAILED) {
-        perror("mmap hatasi");
-        exit(1);
-    }
-
-    g_shm = shared_mem_ptr;
-    sem_t *sem = sem_open(SEM_NAME, O_CREAT, 0666, 1);
-    if (sem == SEM_FAILED) {
-        perror("sem_open hatasi");
-        exit(1);
-    }
-
-    g_sem = sem;
-    sem_wait(sem);
-
-    // sadece ilk defa init
-    if (shared_mem_ptr->magic != SHM_MAGIC) {
-        memset(shared_mem_ptr, 0, sizeof(SharedData));
-        shared_mem_ptr->magic = SHM_MAGIC;
-    }
-
-    // her açılan terminal sayacı artırır
-    shared_mem_ptr->active_procx++;
-
-    printf("[INFO] Aktif instance sayisi: %d\n", shared_mem_ptr->active_procx);
-
-    sem_post(sem);
-
-    msgid = msgget(MSG_KEY, IPC_CREAT | 0666);
-    if (msgid == -1) { perror("msgget"); exit(1); }
-
-
-    if (pthread_create(&monitor_tid, NULL, monitor_thread, (void *)shared_mem_ptr) != 0) {
-        perror("Monitor thread olusturulamadi");
-        exit(1);
-    }
-    g_monitor_started = 1;
-    printf("Monitor thread baslatildi...\n");
-
-    if (pthread_create(&listener_tid, NULL, listener_thread, NULL) != 0) {
-        perror("Listener thread olusturulamadi");
-        exit(1);
-    }
-    g_listener_started = 1;
-    printf("IPC Listener thread baslatildi...\n");
-
+    init_sources();
     int choice;
     while (1) {
         if (g_exit_requested) {
             printf("\n[INFO] Ctrl+C algilandi. Temiz cikis yapiliyor...\n");
-            clean_resources(g_shm, g_sem);
-            _exit(0); // exit yerine _exit: daha “sert” ama güvenli
+            clean_resources(shm, sem);
+            exit(0);
         }
         print_menu();
 
@@ -174,22 +118,81 @@ int main() {
 
         switch (choice) {
             case 1:
-                start_process(shared_mem_ptr, sem);
+                start_process();
                 break;
             case 2:
-                list_processes(shared_mem_ptr, sem);
+                list_processes();
                 break;
             case 3:
-                stop_process(shared_mem_ptr, sem);
+                stop_process();
                 break;
             case 0:
-                clean_resources(shared_mem_ptr, sem);
+                clean_resources();
                 exit(0);
             default:
                 printf("Gecersiz secim! Lutfen tekrar deneyin.\n");
         }
     }
     return 0;
+}
+
+void init_sources() {
+    int shm_fd = shm_open(SHM_NAME, O_CREAT | O_RDWR, 0666);
+    if (shm_fd == -1) {
+        perror("shm_open"); exit(1);
+    }
+
+    if (ftruncate(shm_fd, sizeof(SharedData)) == -1) {
+        perror("ftruncate"); exit(1);
+    }
+
+    shm = (SharedData *)mmap(NULL, sizeof(SharedData),PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+
+    if (shm== MAP_FAILED) {
+        perror("mmap hatasi");
+        exit(1);
+    }
+
+    sem = sem_open(SEM_NAME, O_CREAT, 0666, 1);
+    if (sem == SEM_FAILED) {
+        perror("sem_open hatasi");
+        exit(1);
+    }
+
+    sem_wait(sem);
+
+    // sadece ilk defa init
+    if (shm->magic != SHM_MAGIC) {
+        memset(shm, 0, sizeof(SharedData));
+        shm->magic = SHM_MAGIC;
+    }
+
+    // her açılan terminal sayacı artırır
+    shm->active_procx++;
+
+    printf("[INFO] Aktif instance sayisi: %d\n", shm->active_procx);
+
+    sem_post(sem);
+
+    msgid = msgget(MSG_KEY, IPC_CREAT | 0666);
+    if (msgid == -1) { perror("msgget"); exit(1); }
+
+
+    if (pthread_create(&monitor_tid, NULL, monitor_thread, (void *)shm) != 0) {
+        perror("Monitor thread olusturulamadi");
+        exit(1);
+    }
+    g_monitor_started = 1;
+    printf("Monitor thread baslatildi...\n");
+
+    if (pthread_create(&listener_tid, NULL, listener_thread, NULL) != 0) {
+        perror("Listener thread olusturulamadi");
+        exit(1);
+    }
+    g_listener_started = 1;
+    printf("IPC Listener thread baslatildi...\n");
+
+
 }
 
 // Ctrl+C Handler
@@ -276,7 +279,7 @@ void parse_command(char *cmd, char **args) {
     args[i] = NULL; //execvp icin NUll terminator
 }
 
-void start_process(SharedData * shm, sem_t * sem) {
+void start_process() {
     char cmd[256];
     char * args[16];
     int mode;
@@ -295,6 +298,17 @@ void start_process(SharedData * shm, sem_t * sem) {
     if (args[0] == NULL) {
         printf("Hata: Komut girilmedi!\n");
         return;
+    }
+    sem_wait(sem); //kilidi al
+    for (int i = 0; i < MAX_PROCESS; i++) {
+        if (shm->processes[i].is_active == 0) {
+            process_index = i; // Boş index bulundu
+            break;
+        }
+    }
+    if (process_index == -1) {
+        sem_post(sem); // yer yoktu burda biraktim
+        printf("Yer yok!\n");
     }
 
     pid_t pid = fork();
@@ -316,58 +330,48 @@ void start_process(SharedData * shm, sem_t * sem) {
 
         perror("execvp hatasi");
         exit(1);
-    }
-//bos yer bulup processi ekle --critical section--
-    sem_wait(sem);
+    }else { //burada hala bende sem
 
-    for (int i = 0; i < MAX_PROCESS; i++) {
-        if (shm->processes[i].is_active == 0) {
-            process_index = i; // Boş index bulundu
-            break;
-        }
-    }
 
-    if (process_index != -1) {
-        // shared memorye processi yaz
-        shm->processes[process_index].pid = pid;
-        shm->processes[process_index].owner_pid = getpid();
-        strncpy(shm->processes[process_index].command, cmd_copy, 255);
-        shm->processes[process_index].command[255] = '\0';
-        shm->processes[process_index].mode = (ProcessMode) mode;
-        shm->processes[process_index].status = STATUS_RUNNING;
-        shm->processes[process_index].start_time = time(NULL);
-        shm->processes[process_index].is_active = 1;
-        shm->process_count++;
+        if (process_index != -1) {
+            // shared memorye processi yaz
+            shm->processes[process_index].pid = pid;
+            shm->processes[process_index].owner_pid = getpid();
+            strncpy(shm->processes[process_index].command, cmd_copy, 255);
+            shm->processes[process_index].command[255] = '\0';
+            shm->processes[process_index].mode = (ProcessMode) mode;
+            shm->processes[process_index].status = STATUS_RUNNING;
+            shm->processes[process_index].start_time = time(NULL);
+            shm->processes[process_index].is_active = 1;
+            shm->process_count++;
 
-        printf("[SUCCESS] Process baslatildi: PID %d\n", pid);
+            printf("[SUCCESS] Process baslatildi: PID %d\n", pid);
 
-        // semaphor bırak diger threadler erissin
-        sem_post(sem);
-
-        send_message(CMD_START, pid);
-
-        if (mode == MODE_ATTACHED) {
-            waitpid(pid, &status, 0);
-            printf("\n[INFO] Attached process sonlandi. Menuye donuluyor...\n");
-            sem_wait(sem);
-            shm->processes[process_index].is_active = 0;
-            shm->process_count--;
-            shm->processes[process_index].status= STATUS_TERMINATED;
+            // burda bıraktım
             sem_post(sem);
-            send_message(CMD_STOP,pid);
-            sleep(5);
-            return; // Fonksiyonu burada sonlandırır, alttaki sem_post'u atlar.
-        }
 
-    } else {
-        printf("[ERROR] Process listesi dolu! (Max 50)\n");
-        kill(pid, SIGTERM);
-        // hata durumunda semaphore kilitli kaldi acmaliyiz
-        sem_post(sem);
+            send_message(CMD_START, pid);
+
+            if (mode == MODE_ATTACHED) {
+                waitpid(pid, &status, 0);
+                sem_wait(sem); // en son birakmistim degisim icin almam alzim
+                shm->processes[process_index].is_active = 0;
+                shm->process_count--;
+                shm->processes[process_index].status= STATUS_TERMINATED;
+                sem_post(sem);
+                send_message(CMD_STOP,pid);
+                printf("\n[INFO] Attached process sonlandi. Menuye donuluyor...\n");
+                return; // Fonksiyonu burada sonlandırır, alttaki sem_post'u atlar.
+            }
+
+        } else {
+            printf("[ERROR] Process listesi dolu! (Max 50)\n");
+            kill(pid, SIGTERM);
+        }
     }
 }
 
-void list_processes(SharedData *shm, sem_t *sem) {
+void list_processes() {
     sem_wait(sem);
 
     printf("\n");
@@ -401,7 +405,7 @@ void list_processes(SharedData *shm, sem_t *sem) {
     sem_post(sem);
 }
 
-void stop_process(SharedData *shm, sem_t *sem) {
+void stop_process() {
     pid_t target_pid;
 
     printf("Sonlandirilacak process PID: ");
@@ -415,7 +419,7 @@ void stop_process(SharedData *shm, sem_t *sem) {
         if (errno == EINTR || g_exit_requested) {
             clearerr(stdin);
             printf("\n[INFO] Ctrl+C algilandi. Temiz cikis...\n");
-            clean_resources(g_shm, g_sem);
+            clean_resources(shm, sem);
             exit(0);
         }
 
@@ -434,7 +438,7 @@ void stop_process(SharedData *shm, sem_t *sem) {
     // (Opsiyonel) Ctrl+C flag'i burada da kontrol edebilirsin
     if (g_exit_requested) {
         printf("\n[INFO] Ctrl+C algilandi. Temiz cikis...\n");
-        clean_resources(g_shm, g_sem);
+        clean_resources(shm, sem);
         exit(0);
     }
 
@@ -451,11 +455,10 @@ void stop_process(SharedData *shm, sem_t *sem) {
     if (search != -1) {
         if (kill(target_pid, SIGTERM) == 0) {
             printf("[INFO] Process %d'e SIGTERM sinyali gonderildi.\n", target_pid);
-            shm->processes[search].status = STATUS_TERMINATED;
+
             // İstersen burada send_message(CMD_STOP, target_pid) yaparsın (ama duplicate olmasın diye tek yerde)
         } else if (errno == ESRCH) {
             printf("[INFO] Process %d zaten sonlanmis veya bulunamiyor. Listeden kaldiriliyor.\n", target_pid);
-            shm->processes[search].is_active = 0;
             if (shm->process_count > 0) shm->process_count--;
         } else {
             perror("Sinyal gonderilemedi");
@@ -473,7 +476,6 @@ void *monitor_thread(void *arg) {
     int status;
     pid_t my_pid = getpid();
 
-    sem_t *sem = sem_open(SEM_NAME, 0);
     if (sem == SEM_FAILED) {
         perror("Monitor thread sem_open hatasi");
         return NULL;
@@ -482,25 +484,24 @@ void *monitor_thread(void *arg) {
     while (!g_exit_requested) {
         sleep(2);
         sem_wait(sem);
-        if (g_exit_requested) break;
+        if (g_exit_requested) break; //
 
         for (int i = 0; i < MAX_PROCESS; i++) {
-            if (shm->processes[i].is_active && shm->processes[i].mode == MODE_DETACHED) {
+            if (shm->processes[i].is_active) {
 
                 pid_t process_pid = shm->processes[i].pid;
 
-                // 1. waitpid ile kendi çocuklarımızı kontrol et ve reaped et
-                pid_t result = waitpid(process_pid, &status, WNOHANG);
+                // bu hem aktif hem detached topla abi topla ölmesi
+                pid_t result_pid = waitpid(process_pid, &status, WNOHANG);
 
                 int perform_cleanup = 0;
 
-                if (result > 0) {
+                if (result_pid > 0) {
                     // Kendi çocuğumuz sonlandı. Temizle ve bildirim gönder.
-                    printf("\n[MONITOR] Detached Process %d sonlandi.\n", result);
-                    send_message(CMD_STOP, result);
+                    printf("\n[MONITOR] Detached Process %d sonlandi.\n", result_pid);
                     perform_cleanup = 1;
 
-                } else if (result == -1 && errno == ECHILD) {
+                } else if (result_pid == -1 && errno == ECHILD) {
                     // ECHILD alındı. Eğer sahibi BİZ isek, reaped edildiğini kabul edip temizle.
                     if (shm->processes[i].owner_pid == my_pid) {
                          printf("\n[MONITOR] Kendi baslattigim Detached Process %d sistemden kaybolmus (ECHILD), listeden temizleniyor.\n", process_pid);
@@ -521,8 +522,10 @@ void *monitor_thread(void *arg) {
 
                 // 3. TEMİZLEME İŞLEMİ
                 if (perform_cleanup) {
+                    shm->processes[i].status = STATUS_TERMINATED;
                     shm->processes[i].is_active = 0;
                     if (shm->process_count > 0) shm->process_count--;
+                    send_message(CMD_STOP, process_pid);
                 }
             }
         }
@@ -555,7 +558,7 @@ void send_message(int command, pid_t target_pid) {
     }
 }
 
-void clean_resources(SharedData *shm_ptr, sem_t *sem_ptr) {
+void clean_resources() {
     printf("\n[CLEANUP] Cikis baslatiliyor...\n");
 
     // 0) Thread'lere "çık" sinyali
@@ -563,55 +566,55 @@ void clean_resources(SharedData *shm_ptr, sem_t *sem_ptr) {
 
     // 0.1) Bloklanan threadleri uyandır / kestir
     if (g_listener_started) {
-        pthread_cancel(listener_tid);   // msgrcv cancellation point
+        pthread_cancel(listener_tid);
+        pthread_join(listener_tid, NULL);
+        g_listener_started = 0;
     }
     if (g_monitor_started) {
-        pthread_cancel(monitor_tid);    // sleep cancellation point
+        pthread_cancel(monitor_tid);
+        pthread_join(monitor_tid, NULL);
+        g_monitor_started = 0;
     }
-
-    // 0.2) Join ile gerçekten kapandıklarını bekle (detach yok!)
-    if (g_listener_started) pthread_join(listener_tid, NULL);
-    if (g_monitor_started)  pthread_join(monitor_tid, NULL);
 
     pid_t my_pid = getpid();
     int last_instance = 0;
 
     // 1) Kritik bölüm: SHM + sayaç güncellemesi semaphore ile korunmalı
-    sem_wait(sem_ptr);
+    sem_wait(sem);
 
     // Bu instance'ın başlattığı ATTACHED processleri öldür
     for (int i = 0; i < MAX_PROCESS; i++) {
-        if (shm_ptr->processes[i].is_active &&
-            shm_ptr->processes[i].owner_pid == my_pid) {
+        if (shm->processes[i].is_active &&
+            shm->processes[i].owner_pid == my_pid) {
 
-            if (shm_ptr->processes[i].mode == MODE_ATTACHED) {
+            if (shm->processes[i].mode == MODE_ATTACHED) {
                 printf("[CLEANUP] Attached process %d sonlandiriliyor...\n",
-                       shm_ptr->processes[i].pid);
-                kill(shm_ptr->processes[i].pid, SIGTERM);
+                       shm->processes[i].pid);
+                kill(shm->processes[i].pid, SIGTERM);
             } else {
                 printf("[CLEANUP] Detached process %d calismaya devam ediyor.\n",
-                       shm_ptr->processes[i].pid);
+                       shm->processes[i].pid);
             }
         }
     }
 
     // 2) Instance sayacini azalt
-    if (shm_ptr->active_procx > 0) shm_ptr->active_procx--;
-    last_instance = (shm_ptr->active_procx == 0);
+    if (shm->active_procx > 0) shm->active_procx--;
+    last_instance = (shm->active_procx == 0);
 
-    printf("[CLEANUP] Kalan instance sayisi: %d\n", shm_ptr->active_procx);
+    printf("[CLEANUP] Kalan instance sayisi: %d\n", shm->active_procx);
 
-    sem_post(sem_ptr);
+    sem_post(sem);
 
     // 3) Bu instance kendi map’ini kapatsın
-    if (munmap(shm_ptr, sizeof(SharedData)) != 0) {
+    if (munmap(shm, sizeof(SharedData)) != 0) {
         perror("[CLEANUP] munmap hatasi");
     }
 
     // Bu instance semaphore handle'ini kapatsın
-    sem_close(sem_ptr);
+    sem_close(sem);
 
-    // 4) Sadece son instance global kaynaklari silsin
+    // sadece son instance global kaynaklari silsin
     if (last_instance) {
         printf("[CLEANUP] Son instance. Global kaynaklar siliniyor...\n");
 
@@ -638,37 +641,39 @@ void *listener_thread(void *arg) {
     pthread_setcanceltype(PTHREAD_CANCEL_DEFERRED, NULL);
     Message msg;
     pid_t my_pid = getpid();
-    size_t msg_size = sizeof(Message) - sizeof(long);
+    size_t msg_size = sizeof(Message) - sizeof(long); // tipi cikariyoruz
 
     while (!g_exit_requested) {
-        ssize_t r = msgrcv(msgid, &msg, msg_size, 0, IPC_NOWAIT);
+        //mesaj gelene kadar bekle msgflag = 0
+        // r -> okunan byte sayisi
+        //6.5 surekli dinler
+        ssize_t r = msgrcv(msgid, &msg, msg_size, 0, 0);
 
         if (r == -1) {
             if (errno == ENOMSG) {
-                usleep(50 * 1000); // 50ms
+                printf("651");
+                usleep(50 * 10); // 50ms
                 continue;
             }
-            if (errno == EINTR) continue;
-            perror("msgrcv");
-            usleep(200 * 1000);
-            msgsnd(msgid, &msg, msg_size, 0);
-
+            if (errno == EINTR)
+                perror("msgrcv");
             continue;
         }
 
-        if (msg.sender_pid == my_pid) continue;
-
-        printf("\r\033[K");
-        if (msg.command == CMD_START)
-            printf("[IPC] Process BASLATILDI: PID %d (Gonderen: %d)\n",
-                   msg.target_pid, msg.sender_pid);
-        else if (msg.command == CMD_STOP)
-            printf("[IPC] Process SONLANDIRILDI: PID %d (Gonderen: %d)\n",
-                   msg.target_pid, msg.sender_pid);
-
-        printf("Seciminiz: ");
-        fflush(stdout);
+        if (msg.sender_pid == my_pid) {
+            usleep(20 * 100);
+           msgsnd(msgid, &msg, msg_size, 0);
+        }else{
+            if (msg.command == CMD_START) {
+                printf("[IPC] Process BASLATILDI: PID %d (Gonderen: %d)\n",
+                       msg.target_pid, msg.sender_pid);
+            }
+            else if (msg.command == CMD_STOP) {
+                printf("[IPC] Process SONLANDIRILDI: PID %d (Gonderen: %d)\n",
+                       msg.target_pid, msg.sender_pid);
+            }
+            fflush(stdout);
+        }
     }
-
     return NULL;
 }
