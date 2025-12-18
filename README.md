@@ -1,6 +1,7 @@
 🧠 ProcX – Çoklu Terminal Process Yöneticisi
 
 Birden fazla terminal (instance) üzerinden çalışan, process yönetimi, inter-process communication (IPC) ve eşzamanlılık (concurrency) kavramlarını kullanan bir işletim sistemi dönem projesi.
+
 📋 Proje Hakkında
 
 ProcX, terminal tabanlı bir process yönetim aracıdır ve şunları yapmanıza olanak tanır:
